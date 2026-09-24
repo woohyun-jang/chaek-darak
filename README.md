@@ -9,14 +9,14 @@ Chrome 또는 Edge에서 `index.html`을 직접 여세요. 서버나 API 키는 
 ## 기술 스택
 
 - 화면: HTML, CSS, 순수 JavaScript. 빌드 과정 없이 로컬 파일로 실행합니다.
-- 대화: [WebLLM](https://github.com/mlc-ai/web-llm)과 `Qwen2.5-0.5B-Instruct`를 사용합니다. 추론은 브라우저의 WebGPU에서 실행합니다.
-- 의미 검색: [Transformers.js](https://huggingface.co/docs/transformers.js/index)와 `multilingual-e5-small`로 질의와 책 소개의 임베딩을 계산합니다.
+- 대화: [WebLLM](https://github.com/mlc-ai/web-llm)과 `Qwen2.5-0.5B-Instruct`를 사용합니다. 추론은 브라우저의 WebGPU에서 실행하며, 웹 호스팅에서는 워커가 화면과 별도로 처리합니다.
+- 의미 검색: [Transformers.js](https://huggingface.co/docs/transformers.js/index)와 `multilingual-e5-small`로 질의와 책 소개의 임베딩을 계산합니다. 웹 호스팅에서는 워커가 계산합니다.
 - 데이터: `books-data.js`에 도서 정보와 출처별 추천사를 저장하고, 표지는 `covers/`에 보관합니다.
 
 ## 동작 원리
 
 1. `search.js`가 제목, 추천사, 태그, 추천인의 단어와 한글 2글자 조각으로 BM25 점수를 계산합니다. 제목에는 더 높은 가중치를 줍니다.
-2. 감정·분위기 등 의미 중심 질문에는 임베딩 유사도를 BM25와 합쳐 순위를 매깁니다. 임베딩 모델을 불러올 수 없으면 BM25만 사용합니다.
+2. 감정·분위기 등 의미 중심 질문에는 BM25 상위 후보 12권의 임베딩 유사도를 계산해 점수를 합칩니다. 임베딩 모델을 불러올 수 없거나 검색 시간이 초과되면 BM25만 사용합니다.
 3. `app.js`가 검색 결과의 제목·원문 추천사·추천인 정보를 로컬 LLM에 전달해 추천 이유를 작성합니다. 도서 카드와 원문 링크는 검색 결과에서 직접 만듭니다.
 
 책 추천 요청에는 상위 4권을 보여주고, 연도·월이나 평산책방 추천책·문재인의 추천책 전체 목록을 요청하면 해당 범위의 책을 모두 보여줍니다. 한 책에 추천 기록이 여러 개면 카드는 한 장으로 묶습니다. 인사나 일반 질문에는 도서 검색 없이 답하고, 일반 대화에는 같은 로컬 모델을 사용합니다. 대화 기록은 현재 탭의 메모리에만 유지합니다.

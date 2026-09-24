@@ -14,7 +14,7 @@
   const modelId = 'Qwen2.5-0.5B-Instruct-q4f32_1-MLC';
   let enginePromise;
   let embedderPromise;
-  let passageVectorsPromise;
+  let embeddingWorker;
   let busy = false;
   let lastTurnWasRecommendation = false;
   let lastRecommendedBooks = [];
@@ -199,28 +199,41 @@
     return embedderPromise;
   }
 
-  async function semanticScores(query) {
-    const embedder = await getEmbedder();
-    if (!passageVectorsPromise) {
-      const passages = books.map((book) => {
-        const reviews = book.recommendations.filter((item) => item.attributionVerified !== false).map((item) => item.text.slice(0, 400)).join(' ');
-        return `passage: ${book.title}. ${reviews} ${book.tags.join(' ')}`;
+  async function semanticScores(query, candidates) {
+    const passages = candidates.map((book) => {
+      const review = book.recommendations.find((item) => item.attributionVerified !== false)?.text.slice(0, 200) || '';
+      return `passage: ${book.title}. ${review} ${book.tags.join(' ')}`;
+    });
+    if (location.protocol !== 'file:') {
+      if (!embeddingWorker) embeddingWorker = new Worker('embedding-worker.js', { type: 'module' });
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          embeddingWorker.terminate();
+          embeddingWorker = undefined;
+          reject(new Error('의미 검색 시간 초과'));
+        }, 30000);
+        embeddingWorker.onmessage = ({ data }) => {
+          clearTimeout(timeout);
+          if (data.error) {
+            embeddingWorker.terminate();
+            embeddingWorker = undefined;
+            reject(new Error(data.error));
+          } else resolve(data.scores);
+        };
+        embeddingWorker.onerror = (error) => {
+          clearTimeout(timeout);
+          embeddingWorker.terminate();
+          embeddingWorker = undefined;
+          reject(error);
+        };
+        embeddingWorker.postMessage({ query, passages });
       });
-      passageVectorsPromise = (async () => {
-        const vectors = [];
-        for (let i = 0; i < passages.length; i += 16) {
-          const tensor = await embedder(passages.slice(i, i + 16), { pooling: 'mean', normalize: true });
-          vectors.push(...tensor.tolist());
-        }
-        return vectors;
-      })();
     }
-    const [passages, queryTensor] = await Promise.all([
-      passageVectorsPromise,
-      embedder(`query: ${query}`, { pooling: 'mean', normalize: true })
-    ]);
+    const embedder = await getEmbedder();
+    const passageTensor = await embedder(passages, { pooling: 'mean', normalize: true });
+    const queryTensor = await embedder(`query: ${query}`, { pooling: 'mean', normalize: true });
     const vector = queryTensor.tolist()[0];
-    return passages.map((passage) => search.cosine(vector, passage));
+    return passageTensor.tolist().map((passage) => search.cosine(vector, passage));
   }
 
   async function searchBooks(query, collection) {
@@ -230,11 +243,13 @@
     if (!eligible.length) return { books: [], method: 'bm25' };
     const bm25 = search.lexicalScores(query, books, index);
     let method = search.route(query);
-    let semantic;
+    const semantic = new Map();
     if (method === 'hybrid') {
       modelStatus.textContent = '의미 검색 모델 준비 중';
       try {
-        semantic = await semanticScores(query);
+        const candidates = eligible.slice().sort((a, b) => bm25[books.indexOf(b)] - bm25[books.indexOf(a)]).slice(0, 12);
+        const scores = await semanticScores(query, candidates);
+        candidates.forEach((book, i) => semantic.set(book, scores[i]));
       } catch (error) {
         console.warn('의미 검색을 사용할 수 없어 BM25로 검색합니다.', error);
         method = 'bm25';
@@ -244,7 +259,7 @@
     const ranked = eligible.map((book) => {
       const i = books.indexOf(book);
       const lexical = bm25[i] / maxBm25;
-      const meaning = semantic ? Math.max(0, semantic[i]) : 0;
+      const meaning = Math.max(0, semantic.get(book) || 0);
       return { book, score: method === 'hybrid' ? lexical * 0.45 + meaning * 0.55 : lexical };
     }).sort((a, b) => b.score - a.score);
     const wantsMonthlyList = Boolean(collection) || /(?:20\d{2}년|(?:^|\s)(?:1[0-2]|0?[1-9])월|재임\s*[전중]|퇴임\s*후|평산책방\s*추천책|문재인(?:의)?\s*추천책)/.test(query) && /목록|전체|모두|보여/.test(query);
@@ -255,23 +270,44 @@
     return { books: (selected.length ? selected : ranked.slice(0, limit)).map((entry) => entry.book), method, fullList: wantsMonthlyList };
   }
 
-  async function getEngine() {
+  async function getEngine(onProgress) {
     if (!enginePromise) {
       modelStatus.textContent = '대화 모델 다운로드 중';
-      enginePromise = import('https://esm.run/@mlc-ai/web-llm@0.2.81').then(({ CreateMLCEngine }) =>
-        CreateMLCEngine(modelId, {
+      enginePromise = import('https://esm.run/@mlc-ai/web-llm@0.2.81').then(async ({ CreateMLCEngine, CreateWebWorkerMLCEngine }) => {
+        const options = {
           initProgressCallback: (progress) => {
             const percent = Math.round((progress.progress || 0) * 100);
             modelStatus.textContent = `로컬 모델 준비 중 ${percent}%`;
+            onProgress?.(percent);
           }
-        }));
+        };
+        if (location.protocol === 'file:') return CreateMLCEngine(modelId, options);
+        const worker = new Worker('llm-worker.js', { type: 'module' });
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('대화 모델 워커 준비 시간 초과')), 30000);
+          worker.onmessage = ({ data }) => {
+            if (data?.kind !== 'ready') return;
+            clearTimeout(timeout);
+            resolve();
+          };
+          worker.onerror = (error) => {
+            clearTimeout(timeout);
+            reject(error);
+          };
+        }).catch((error) => {
+          worker.terminate();
+          throw error;
+        });
+        return CreateWebWorkerMLCEngine(worker, modelId, options);
+      });
     }
     return enginePromise;
   }
 
-  async function answerWithModel(query, results, collection) {
-    const engine = await getEngine();
+  async function answerWithModel(query, results, collection, onProgress) {
+    const engine = await getEngine(onProgress);
     modelStatus.textContent = '로컬 모델 사용 중';
+    onProgress?.(null);
     const evidence = results.map((book, i) => {
       const recommendation = recommendationFor(query, book, collection);
       const review = recommendation.attributionVerified === false
@@ -288,12 +324,13 @@
     return response.choices[0]?.message?.content?.trim() || '검색 결과에서 마음에 드는 책을 골라보세요.';
   }
 
-  async function answerGeneral(query) {
+  async function answerGeneral(query, onProgress) {
     if (/^(안녕|안녕하세요|하이|hi|hello)[!?.~\s]*$/i.test(query)) return '안녕하세요! 무엇을 도와드릴까요?';
     if (/^(고마워|고마워요|감사해|감사합니다|thanks)[!?.~\s]*$/i.test(query)) return '천만에요. 또 궁금한 점이 있으면 말씀해 주세요.';
     if (/^(너는 누구|넌 누구|무슨 앱)/.test(query)) return '저는 책다락입니다. 책을 함께 찾거나 일반적인 질문에도 답할 수 있어요.';
-    const engine = await getEngine();
+    const engine = await getEngine(onProgress);
     modelStatus.textContent = '로컬 모델 사용 중';
+    onProgress?.(null);
     const recentBooks = lastRecommendedBooks.map((book, i) => {
       const item = book.recommendations.find((recommendation) => recommendation.attributionVerified !== false);
       return `${i + 1}. ${book.title}: ${item?.text.slice(0, 300) || '확인된 소개 없음'}`;
@@ -322,7 +359,11 @@
       if (!wantsBooks) {
         answer.textContent = '답변을 생각하고 있어요…';
         try {
-          answer.textContent = await answerGeneral(query.trim());
+          answer.textContent = await answerGeneral(query.trim(), (percent) => {
+            answer.textContent = percent === null
+              ? '답변을 작성하고 있어요…'
+              : `로컬 대화 모델을 준비하고 있어요… ${percent}%`;
+          });
         } catch (error) {
           console.error('로컬 대화 모델을 사용할 수 없습니다.', error);
           modelStatus.textContent = '로컬 모델 실행 불가';
@@ -331,6 +372,7 @@
         }
         lastTurnWasRecommendation = false;
       } else {
+        if (search.route(query.trim()) === 'hybrid') answer.textContent = '의미를 살펴보며 책을 찾고 있어요…';
         const result = await searchBooks(query.trim(), collection);
         fullList = result.fullList;
         if (!result.books.length) {
@@ -342,7 +384,11 @@
           } else {
             answer.textContent = '검색한 책을 바탕으로 추천 이유를 정리하고 있어요. 처음에는 로컬 모델 다운로드가 조금 걸릴 수 있습니다.';
             try {
-              answer.textContent = await answerWithModel(query.trim(), result.books, collection);
+              answer.textContent = await answerWithModel(query.trim(), result.books, collection, (percent) => {
+                answer.textContent = percent === null
+                  ? '추천 이유를 작성하고 있어요…'
+                  : `추천 이유를 작성할 로컬 모델을 준비하고 있어요… ${percent}%`;
+              });
             } catch (error) {
               console.error('로컬 대화 모델을 사용할 수 없습니다.', error);
               modelStatus.textContent = '로컬 모델 실행 불가';
