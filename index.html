@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>책다락 — 나에게 맞는 한 권을 찾는 대화</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Nanum+Myeongjo:wght@400;700;800&family=Pretendard:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-icon">▥</span><span>책다락<small>CHA E K D A R A K</small></span></div>
+      <button class="new-chat" id="new-chat" type="button"><span>＋</span> 새로운 대화</button>
+      <nav class="side-section" id="source-navigation" aria-label="추천 목록"></nav>
+      <div class="sidebar-bottom">
+        <div class="model-mark"><span class="pulse"></span><span id="model-status">로컬 모델 준비 전</span></div>
+        <p>평산책방과 진주문고의 추천 기록을 바탕으로 구성했습니다. 대화는 브라우저에서 처리됩니다.</p>
+        <a href="https://www.psbooks.kr/75" target="_blank" rel="noopener noreferrer">평산책방 목록 ↗</a> · <a href="https://blog.naver.com/jinjumoongo/224405725299" target="_blank" rel="noopener noreferrer">진주문고 글 ↗</a>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><span class="mobile-brand">책다락</span><span class="top-title">나의 책 찾기</span><span class="top-meta">평산책방 · 진주문고 <span class="top-star">✳</span> 추천 도서</span></header>
+      <div class="content-scroll" id="scroll-area">
+        <section class="hero" id="hero">
+          <div class="eyebrow"><span class="eyebrow-line"></span> THE READING ROOM</div>
+          <h1>오늘, 어떤 책이<br><em>마음에 머무를까요?</em></h1>
+          <p>지금의 기분, 읽고 싶은 이야기, 문득 궁금해진 주제를 들려주세요.<br>두 책방이 소개한 책들 사이에서 함께 찾아볼게요.</p>
+          <div class="sample-label">이런 이야기로 시작해 보세요</div>
+          <div class="prompts" id="prompts">
+            <button type="button" data-prompt="마음이 지칠 때 위로가 되는 책 추천해줘"><span>✳</span> 마음이 지칠 때 위로가 되는 책</button>
+            <button type="button" data-prompt="밤새 읽을 만큼 몰입되는 미스터리 소설"><span>✳</span> 밤새 읽을 만큼 몰입되는 소설</button>
+            <button type="button" data-prompt="요즘 대화가 어려운데 관련된 책 있을까?"><span>✳</span> 대화가 어려운 요즘에 읽을 책</button>
+            <button type="button" data-prompt="평산책방 재임 전 추천책 전체 목록 보여줘"><span>✳</span> 평산책방 재임 전 추천책</button>
+            <button type="button" data-prompt="평산책방 추천책 전체 목록 보여줘"><span>✳</span> 평산책방 추천책 전체 목록</button>
+            <button type="button" data-prompt="2025년 9월 추천책 전체 목록 보여줘"><span>✳</span> 2025년 9월 추천책 전체 목록</button>
+          </div>
+        </section>
+        <section class="conversation" id="conversation" aria-live="polite"></section>
+      </div>
+      <div class="composer-wrap">
+        <form class="composer" id="chat-form">
+          <textarea id="message" rows="1" placeholder="어떤 책을 찾고 계신가요?" aria-label="책 추천 요청" required></textarea>
+          <button id="send" type="submit" aria-label="메시지 보내기">↑</button>
+        </form>
+        <div class="composer-note">로컬 AI · 처음 사용 시 모델 다운로드가 필요합니다 <span>↗</span> <span>Enter 전송 · Shift+Enter 줄바꿈</span></div>
+      </div>
+    </main>
+    <aside class="curation-panel">
+      <div class="panel-top"><span>CURATED SHELF</span><span>✳</span></div>
+      <div class="panel-heading"><small>TODAY'S PICKS</small><h2>오늘의<br>추천책</h2><p>두 책방의 추천 기록에서<br>오늘 펼쳐볼 다섯 권.</p></div>
+      <div class="panel-books" id="panel-books"></div>
+      <div class="panel-footer"><span id="panel-date"></span><span id="panel-count"></span></div>
+    </aside>
+  </div>
+  <script src="books-data.js"></script>
+  <script src="search.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
