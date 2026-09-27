@@ -354,15 +354,28 @@
     input.style.height = '';
     addUserTurn(query.trim());
     const { turn, answer } = addAssistantTurn();
+    let loadingTimer;
+    const showLoading = (messages) => {
+      clearInterval(loadingTimer);
+      answer.classList.add('loading');
+      answer.textContent = messages[0];
+      if (messages.length > 1) {
+        let current = 0;
+        loadingTimer = setInterval(() => {
+          current = (current + 1) % messages.length;
+          answer.textContent = messages[current];
+        }, 2800);
+      }
+    };
     let fullList = false;
     try {
       if (!wantsBooks) {
-        answer.textContent = '답변을 생각하고 있어요…';
+        showLoading(['답변을 생각하고 있어요', '질문을 살펴보고 있어요']);
         try {
           answer.textContent = await answerGeneral(query.trim(), (percent) => {
-            answer.textContent = percent === null
-              ? '답변을 작성하고 있어요…'
-              : `로컬 대화 모델을 준비하고 있어요… ${percent}%`;
+            showLoading(percent === null
+              ? ['답변을 작성하고 있어요', '문장을 다듬고 있어요']
+              : [`로컬 대화 모델을 준비하고 있어요 · ${percent}%`]);
           });
         } catch (error) {
           console.error('로컬 대화 모델을 사용할 수 없습니다.', error);
@@ -372,7 +385,9 @@
         }
         lastTurnWasRecommendation = false;
       } else {
-        if (search.route(query.trim()) === 'hybrid') answer.textContent = '의미를 살펴보며 책을 찾고 있어요…';
+        if (search.route(query.trim()) === 'hybrid') {
+          showLoading(['질문에 맞는 책을 찾고 있어요', '추천 기록을 살펴보고 있어요', '어울리는 책을 고르고 있어요']);
+        } else showLoading(['책장을 살펴보고 있어요']);
         const result = await searchBooks(query.trim(), collection);
         fullList = result.fullList;
         if (!result.books.length) {
@@ -382,12 +397,12 @@
           if (result.fullList) {
             answer.textContent = `요청하신 추천책 ${result.books.length}권을 찾았습니다. 아래에서 각 책의 소개와 원문을 확인해 보세요.`;
           } else {
-            answer.textContent = '검색한 책을 바탕으로 추천 이유를 정리하고 있어요. 처음에는 로컬 모델 다운로드가 조금 걸릴 수 있습니다.';
+            showLoading(['추천 이유를 정리하고 있어요', '책과 질문을 연결하고 있어요']);
             try {
               answer.textContent = await answerWithModel(query.trim(), result.books, collection, (percent) => {
-                answer.textContent = percent === null
-                  ? '추천 이유를 작성하고 있어요…'
-                  : `추천 이유를 작성할 로컬 모델을 준비하고 있어요… ${percent}%`;
+                showLoading(percent === null
+                  ? ['추천 이유를 작성하고 있어요', '소개할 문장을 다듬고 있어요']
+                  : [`로컬 대화 모델을 준비하고 있어요 · ${percent}%`]);
               });
             } catch (error) {
               console.error('로컬 대화 모델을 사용할 수 없습니다.', error);
@@ -405,6 +420,8 @@
       console.error(error);
       answer.textContent = '검색 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.';
     } finally {
+      clearInterval(loadingTimer);
+      answer.classList.remove('loading');
       busy = false;
       send.disabled = false;
       input.focus();
